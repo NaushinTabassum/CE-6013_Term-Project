@@ -1,0 +1,301 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo = FALSE}
+library(ggplot2)
+library(ggpubr)
+library(reshape2)
+library(writexl)
+library(dplyr)
+```
+```{r}
+### CAMS Daily Data
+daily1 <- function(df){
+daily_df <- data.frame(matrix(ncol=dim(df)[2], nrow=length(unique(df$Date))))
+colnames(daily_df) <- names(df)
+daily_df[,1] <- unique(df$Date)
+daily_df$month <- months(daily_df$Date)
+daily_df$year <- format(daily_df$Date, format="%Y")
+daily_df$day <- format(daily_df$Date, format="%d")
+return(daily_df)
+}
+daily2<- function(df, daily_df){
+days <- seq(1,(dim(df)[1]),by=24) #i in days for counting rows of df
+ 
+k=1                                 #k for for counting rows of daily_df
+for(i in days){
+  for(j in 2:20){
+    hourly_values <- df[i:(i+23),j]
+    non_missing <- hourly_values[!is.na(hourly_values)]
+    if(j!=18){
+      
+      ###disable this if condition for reproducing the previous result
+      #it is applied so that at least 50% of the hourly observations/day are available
+      
+       if(length(non_missing)/length(hourly_values) >= 0.5){   #comment
+        daily_df[k,j] <- mean(hourly_values, na.rm=TRUE)
+      }                        #comment
+      else{                    #comment
+        daily_df[k,j] <- NA    #comment
+      }                        #comment
+    }
+   else{
+     daily_df[k,j] <- sum(hourly_values, na.rm=TRUE) #total daily rain
+   }
+  }
+  k=k+1
+}
+  daily_df <- daily_df[!is.na(daily_df$Date),]
+  daily_df$month <- factor(months(daily_df$Date, abbreviate=T), levels=unique(months(daily_df$Date, abbreviate=T)))
+return(daily_df)
+}
+```
+
+```{r}
+df_st <- read.csv("df_BARC.csv", 
+                 stringsAsFactors = FALSE,
+                 na.strings = "NA")
+    for(l in 2:20){
+    df_st[,l] <- as.numeric(df_st[,l])
+    }
+df_st$Date <- as.Date(df_st$Date,format="%m/%d/%Y")
+
+ daily_df <- daily1(df_st)
+ daily_df <- daily2(df_st, daily_df)
+```
+
+
+```{r}
+df <- daily_df
+months <- seq.Date(df[1,1],df[dim(df)[1],1],by="month")
+monthly_df <- data.frame(matrix(nrow=length(months), ncol=dim(df)[2]))
+colnames(monthly_df) <- names(df)
+monthly_df[,1] <- months
+monthly_df$month <- format(monthly_df$Date, format="%m")
+monthly_df$year <- format(monthly_df$Date, format="%Y")
+```
+
+```{r}
+# function for counting days in a month 
+numberOfDays <- function(date) {
+    m <- format(date, format="%m")
+
+    while (format(date, format="%m") == m) {
+        date <- date + 1
+    }
+
+    return(as.integer(format(date - 1, format="%d")))
+}
+```
+
+```{r}
+k=1
+for(i in 1:length(months)){
+  for(j in 2:(dim(df)[2]-3)){
+    daily_values <- daily_df[k:(k+numberOfDays(daily_df[k,1])-1),j]
+    monthly_df[i,j] <- mean(daily_values, na.rm=TRUE)
+  }
+  k= k+numberOfDays(daily_df[k,1])
+}
+```
+
+
+```{r}
+monthly_df$month <- format(monthly_df$Date, format="%b")
+monthly_df$year <- format(monthly_df$Date, format="%Y")
+monthly_df <- monthly_df[,c(1,2,3,4,6,8,10,11,21,22)]
+```
+
+```{r}
+monthly_df <- monthly_df %>% filter(year %in% c(2015:2020) & (month!="Dec")) 
+monthly_df$month <- factor(monthly_df$month, levels=c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"))
+monthly_df$year <- factor(monthly_df$year, levels=c("2015", "2016", "2017", "2018", "2019", "2020"))
+```
+
+```{r}
+monthly_melted <- melt(monthly_df,id.vars = c("year","month", "Date"))
+monthly_melted$month_no <- format(monthly_melted$Date, format="%m")
+monthly_melted$month_no <- as.numeric(monthly_melted$month_no)
+
+monthly_df$c.so2<-rep(0,dim(monthly_df)[1])
+monthly_df$c.no<-rep(0,dim(monthly_df)[1])
+monthly_df$c.no2<-rep(0,dim(monthly_df)[1])
+monthly_df$c.co<-rep(0,dim(monthly_df)[1])
+monthly_df$c.o3<-rep(0,dim(monthly_df)[1])
+monthly_df$c.pm25<-rep(0,dim(monthly_df)[1])
+monthly_df$c.pm10<-rep(0,dim(monthly_df)[1])
+```
+
+```{r}
+intervals <- seq(1,(dim(monthly_df)[1]),by=11)
+for(i in intervals){
+  for(j in 0:10){
+    for(k in 2:8){
+      monthly_df[i+j+11,k+9] <- round((100*(monthly_df[i+j+11,k]-monthly_df[i+j,k])/monthly_df[i+j,k]),digits=0)
+    }
+  }
+}
+monthly_df <- monthly_df[1:66,]
+```
+
+
+```{r}
+so2 <-ggplot(monthly_df,aes(x=month,y=SO2, fill=year))+
+  geom_bar(stat="identity",position=position_dodge())+
+  ggtitle(expression(paste("Monthly Comparison of SO"[2] ," Concentration (CAMS-2)")))+ xlab("Month")+ 
+  ylab(expression(paste("SO"[2] ," Concentration ( ",mu,"g/m"^3," )")))+
+  geom_hline(yintercept=40, color="dark red", linetype=2, show.legend = T)+geom_text(aes(4.5,40,label =40,vjust = 1.5, hjust=0),size=3,col = "dark red")+
+  geom_text(aes(label=c.so2), position=position_dodge(width=0.9), vjust=-0.35, size=2)+
+  scale_fill_manual(name="", labels=c("2015", "2016", "2017", "2018", "2019", "2020"),
+                     values=c("light blue", "yellow", "orange","dark orange", "maroon","red"))+
+  theme_bw()+
+  theme(plot.title=element_text(hjust=0.5))+
+  theme(legend.position = "top", 
+        legend.title=element_blank(),
+        legend.key.size = unit(0.25,"cm"))
+so2
+```
+```{r}
+PM2.5 <-ggplot(monthly_df,aes(x=month,y=PM2.5, fill=year))+
+  geom_bar(stat="identity",position=position_dodge())+
+  ggtitle(expression(paste("Monthly Comparison of PM"[2.5] ," Concentration (CAMS-2)")))+ xlab("Month")+ 
+  ylab(expression(paste("PM"[2.5] ," Concentration ( ",mu,"g/m"^3," )")))+
+  geom_hline(yintercept=15, color="dark red", linetype=2, show.legend = T)+
+  geom_text(aes(4.5,15,label = 15,vjust = -.5, hjust=0),size=3,col = "dark red")+
+  geom_text(aes(label=c.pm25), position=position_dodge(width=0.9), vjust=-0.35, size=2,col = "black")+
+  scale_fill_manual(name="", labels=c("2015", "2016", "2017", "2018", "2019", "2020"),
+                     values=c("light blue", "yellow", "orange","dark orange", "maroon","red"))+ylim(c(0,230))+
+  theme_bw()+
+  theme(plot.title=element_text(hjust=0.5))+
+  theme(legend.position = "top", 
+        legend.title=element_blank(),
+        legend.key.size = unit(0.25,"cm"))
+PM2.5
+```
+
+```{r}
+PM10 <-ggplot(monthly_df,aes(x=month,y=PM10, fill=year))+
+  geom_bar(stat="identity",position=position_dodge())+
+  ggtitle(expression(paste("Monthly Comparison of PM"[10] ," Concentration (CAMS-2)")))+ xlab("Month")+ 
+  ylab(expression(paste("PM"[10] ," Concentration ( ",mu,"g/m"^3," )")))+
+  geom_hline(yintercept=45, color="dark red", linetype=2, show.legend = T)+
+  geom_text(aes(4.5,45,label = 45,vjust = -.5, hjust=0),size=3,col = "dark red")+
+  geom_text(aes(label=c.pm10), position=position_dodge(width=0.9), vjust=-0.35, size=2,col = "black")+
+  scale_fill_manual(name="", labels=c("2015", "2016", "2017", "2018", "2019", "2020"),
+                     values=c("light blue", "yellow", "orange","dark orange", "maroon","red"))+ylim(c(0,430))+
+  theme_bw()+
+  theme(plot.title=element_text(hjust=0.5))+
+  theme(legend.position = "top", 
+        legend.title=element_blank(),
+        legend.key.size = unit(0.25,"cm"))
+PM10
+```
+
+
+```{r}
+NO2 <-ggplot(monthly_df,aes(x=month,y=NO2, fill=year))+
+  geom_bar(stat="identity",position=position_dodge())+
+  ggtitle(expression(paste("Monthly Comparison of NO"[2] ," Concentration (CAMS-2)")))+ xlab("Month")+ 
+  ylab(expression(paste("NO"[2] ," Concentration ( ",mu,"g/m"^3," )")))+
+  geom_hline(yintercept=25, color="dark red", linetype=2, show.legend = T)+
+  geom_text(aes(4.5,25,label = 25,vjust = 1.5, hjust=0),size=3,col = "dark red")+
+  geom_text(aes(label=c.no2), position=position_dodge(width=0.9), vjust=-0.35, size=2,col = "black")+
+  scale_fill_manual(name="", labels=c("2015", "2016", "2017", "2018", "2019", "2020"),
+                     values=c("light blue", "yellow", "orange","dark orange", "maroon","red"))+ylim(c(0,110))+
+  theme_bw()+
+  theme(plot.title=element_text(hjust=0.5))+
+  theme(legend.position = "top", 
+        legend.title=element_blank(),
+        legend.key.size = unit(0.25,"cm"))
+NO2
+```
+
+
+```{r}
+CO <-ggplot(monthly_df,aes(x=month,y=CO, fill=year))+
+  geom_bar(stat="identity",position=position_dodge())+
+  ggtitle(expression(paste("Monthly Comparison of CO Concentration (CAMS-2)")))+ xlab("Month")+ 
+  ylab(expression(paste("CO Concentration ( ",mu,"g/m"^3," )")))+
+  geom_hline(yintercept=9, color="dark red", linetype=2, show.legend = T)+
+  geom_text(aes(4.5,9,label = 9,vjust = 1.5, hjust=0),size=3,col = "dark red")+
+  geom_text(aes(label=c.co), position=position_dodge(width=0.9), vjust=-0.35, size=2,col = "black")+
+  scale_fill_manual(name="", labels=c("2015", "2016", "2017", "2018", "2019", "2020"),
+                     values=c("light blue", "yellow", "orange","dark orange", "maroon","red"))+
+  theme_bw()+
+  theme(plot.title=element_text(hjust=0.5))+
+  theme(legend.position = "top", 
+        legend.title=element_blank(),
+        legend.key.size = unit(0.25,"cm"))
+CO
+```
+
+```{r}
+O3 <-ggplot(monthly_df,aes(x=month,y=O3, fill=year))+
+  geom_bar(stat="identity",position=position_dodge())+
+  ggtitle(expression(paste("Monthly Comparison of O"[3] ," Concentration (CAMS-2)")))+ xlab("Month")+ 
+  ylab(expression(paste("O"[3] ," Concentration ( ",mu,"g/m"^3," )")))+
+  geom_hline(yintercept=60, color="dark red", linetype=2, show.legend = T)+
+  geom_text(aes(4.5,60,label = 60,vjust = 1.5, hjust=0),size=3,col = "dark red")+
+  geom_text(aes(label=c.o3), position=position_dodge(width=0.9), vjust=-0.35, size=2,col = "black")+
+  scale_fill_manual(name="", labels=c("2015", "2016", "2017", "2018", "2019", "2020"),
+                     values=c("light blue", "yellow", "orange","dark orange", "maroon","red"))+
+  theme_bw()+
+  theme(plot.title=element_text(hjust=0.5))+
+  theme(legend.position = "top", 
+        legend.title=element_blank(),
+        legend.key.size = unit(0.25,"cm"))
+O3
+```
+
+```{r}
+NO <-ggplot(monthly_df,aes(x=month,y=NO, fill=year))+
+  geom_bar(stat="identity",position=position_dodge())+
+  ggtitle(expression(paste("Monthly Comparison of NO Concentration (CAMS-2)")))+ xlab("Month")+ 
+  ylab(expression(paste("NO Concentration ( ",mu,"g/m"^3," )")))+
+  # geom_hline(yintercept=25, color="dark red", linetype=2, show.legend = T)+
+  # geom_text(aes(4.5,25,label = 25,vjust = 1.5, hjust=0),size=3,col = "dark red")+
+  geom_text(aes(label=c.no), position=position_dodge(width=0.9), vjust=-0.35, size=2,col = "black")+
+  scale_fill_manual(name="", labels=c("2015", "2016", "2017", "2018", "2019", "2020"),
+                     values=c("light blue", "yellow", "orange","dark orange", "maroon","red"))+ylim(c(0,165))+
+  theme_bw()+
+  theme(plot.title=element_text(hjust=0.5))+
+  theme(legend.position = "top", 
+        legend.title=element_blank(),
+        legend.key.size = unit(0.25,"cm"))
+NO
+```
+
+```{r}
+ggsave("6013_2_PM2.5.png",
+           PM2.5,device = "png", dpi=130, width=7, height=4.2)
+```
+```{r}
+ggsave("6013_2_PM10.png",
+           PM10,device = "png", dpi=130, width=7, height=4.2)
+```
+```{r}
+ggsave("6013_2_SO2.png",
+           so2,device = "png", dpi=130, width=7, height=4.2)
+```
+```{r}
+ggsave("6013_2_NO2.png",
+           NO2,device = "png", dpi=130, width=7, height=4.2)
+```
+```{r}
+ggsave("6013_2_CO.png",
+           CO,device = "png", dpi=130, width=7, height=4.2)
+```
+```{r}
+ggsave("6013_2_O3.png",
+           O3,device = "png", dpi=130, width=7, height=4.2)
+```
+```{r}
+ggsave("6013_2_NO.png",
+           NO,device = "png", dpi=130, width=7, height=4.2)
+```
